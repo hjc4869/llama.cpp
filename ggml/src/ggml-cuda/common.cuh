@@ -143,9 +143,9 @@ typedef float2 dfloat2;
 #define FAST_FP16_AVAILABLE
 #endif // defined(FP16_AVAILABLE) && __CUDA_ARCH__ != 610
 
-#if !(defined(GGML_USE_HIP) && defined(__HIP_PLATFORM_AMD__)) && __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
+#if (__CUDA_ARCH__ < GGML_CUDA_CC_OFFSET_AMD && __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA) || defined(RDNA3) || defined(CDNA)
 #define FP16_MMA_AVAILABLE
-#endif // !(defined(GGML_USE_HIP) && defined(__HIP_PLATFORM_AMD__)) && __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
+#endif //  (__CUDA_ARCH__ < GGML_CUDA_CC_OFFSET_AMD && __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA) || defined(RDNA3) || defined(CDNA)
 
 #if !(defined(GGML_USE_HIP) && defined(__HIP_PLATFORM_AMD__)) && __CUDA_ARCH__ >= GGML_CUDA_CC_TURING
 #define INT8_MMA_AVAILABLE
@@ -160,7 +160,7 @@ static constexpr bool fast_fp16_available(const int cc) {
 }
 
 static constexpr bool fp16_mma_available(const int cc) {
-    return cc < GGML_CUDA_CC_OFFSET_AMD && cc >= GGML_CUDA_CC_VOLTA;
+    return cc < GGML_CUDA_CC_OFFSET_AMD && cc >= GGML_CUDA_CC_VOLTA || cc >= GGML_CUDA_CC_CDNA && cc < GGML_CUDA_CC_RDNA1 || cc >= GGML_CUDA_CC_RDNA3;
 }
 
 static constexpr bool int8_mma_available(const int cc) {
