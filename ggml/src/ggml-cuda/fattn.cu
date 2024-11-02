@@ -218,7 +218,9 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
 
     // On AMD the tile kernels perform poorly, use the vec kernel instead:
     if (cc >= GGML_CUDA_CC_OFFSET_AMD) {
-        if (prec == GGML_PREC_DEFAULT && fast_fp16_available(cc)) {
+        if (fp16_mma_available(cc) && dst->src[0]->ne[1] > 8) {
+            ggml_cuda_flash_attn_ext_wmma_f16(ctx, dst);
+        } else if (prec == GGML_PREC_DEFAULT && fast_fp16_available(cc)) {
             ggml_cuda_flash_attn_ext_vec_f16(ctx, dst);
         } else {
             ggml_cuda_flash_attn_ext_vec_f32(ctx, dst);
