@@ -39,12 +39,6 @@ endif()
 find_package(hip     REQUIRED)
 find_package(hipblas REQUIRED)
 find_package(rocblas REQUIRED)
-if (GGML_HIP_ROCWMMA_FATTN)
-    CHECK_INCLUDE_FILE_CXX("rocwmma/rocwmma.hpp" FOUND_ROCWMMA)
-    if (NOT ${FOUND_ROCWMMA})
-        message(FATAL_ERROR "rocwmma has not been found")
-    endif()
-endif()
 
 if (${hip_VERSION} VERSION_LESS 5.5)
     message(FATAL_ERROR "At least ROCM/HIP V5.5 is required")
@@ -82,6 +76,11 @@ ggml_add_backend_library(ggml-hip
                          ${GGML_SOURCES_ROCM}
                         )
 
+if (GGML_HIP_ROCWMMA_FATTN)
+    if (WIN32)
+        target_compile_options(ggml-hip PRIVATE "-I${CMAKE_CURRENT_LIST_DIR}/rocwmma/library/include/")
+    endif()
+endif()
 # TODO: do not use CUDA definitions for HIP
 if (NOT GGML_BACKEND_DL)
     target_compile_definitions(ggml PUBLIC GGML_USE_CUDA)
