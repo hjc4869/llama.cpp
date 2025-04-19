@@ -2927,6 +2927,90 @@ struct server_context {
                 continue;
             }
 
+            if (slot.state == SLOT_STATE_GENERATING && slot.is_processing() && slot.can_speculate()) {
+                // determine the max draft that fits the current slot state
+                int n_draft_max = slot.params.speculative.n_max;
+
+                // note: n_past is not yet increased for the `id` token sampled above
+                //       also, need to leave space for 1 extra token to allow context shifts
+                n_draft_max = std::min(n_draft_max, slot.n_ctx - slot.n_past - 2);
+
+                if (slot.n_remaining > 0) {
+                    n_draft_max = std::min(n_draft_max, slot.n_remaining - 1);
+                }
+
+                SLT_DBG(slot, "max possible draft: %d\n", n_draft_max);
+
+                if (n_draft_max >= slot.params.speculative.n_min) {
+                    llama_token id = slot.sampled;
+
+                    struct common_speculative_params params_spec;
+                    params_spec.n_draft   = n_draft_max;
+                    params_spec.n_reuse   = llama_n_ctx(slot.ctx_dft) - slot.params.speculative.n_max;
+                    params_spec.p_min     = slot.params.speculative.p_min;
+
+                    llama_tokens draft = common_speculative_gen_draft(slot.spec, params_spec, slot.cache_tokens, id);
+
+                    // keep track of total number of tokens generated in the draft
+                    slot.n_draft_total += draft.size();
+
+                    // ignore small drafts
+                    if (slot.params.speculative.n_min <= (int) draft.size()) {
+                        // construct the speculation batch
+                        common_batch_clear(slot.batch_spec);
+                        common_batch_add  (slot.batch_spec, id, slot.n_past, { slot.id }, true);
+
+                        for (size_t i = 0; i < draft.size(); ++i) {
+                            common_batch_add(slot.batch_spec, draft[i], slot.n_past + 1 + i, { slot.id }, true);
+                        }
+
+                        SLT_DBG(slot, "decoding speculative batch, size = %d\n", slot.batch_spec.n_tokens);
+
+                        llama_decode(ctx, slot.batch_spec);
+
+                        // the accepted tokens from the speculation
+                        const auto ids = common_sampler_sample_and_accept_n(slot.smpl, ctx, draft);
+
+                        slot.n_past    += ids.size();
+                        slot.n_decoded += ids.size();
+
+                        // update how many tokens out of draft was accepted
+                        slot.n_draft_accepted += ids.size() - 1;
+
+                        slot.cache_tokens.push_back(id);
+                        slot.cache_tokens.insert(slot.cache_tokens.end(), ids.begin(), ids.end() - 1);
+
+                        llama_kv_self_seq_rm(ctx, slot.id, slot.n_past, -1);
+
+                        for (size_t i = 0; i < ids.size(); ++i) {
+                            completion_token_output result;
+
+                            result.tok          = ids[i];
+                            result.text_to_send = common_token_to_piece(ctx, result.tok, accept_special_token(slot, result.tok));
+                            result.prob         = 1.0f; // set later
+
+                            // TODO: set result.probs
+
+                            if (!process_token(result, slot)) {
+                                // release slot because of stop condition
+                                slot.release();
+                                slot.print_timings();
+                                send_final_response(slot);
+                                metrics.on_prediction(slot);
+                                break;
+                            }
+                        }
+
+                        SLT_DBG(slot, "accepted %d/%d draft tokens, new n_past = %d\n", (int) ids.size() - 1, (int) draft.size(), slot.n_past);
+                        continue;
+                    }
+
+                    SLT_DBG(slot, "ignoring small draft: %d < %d\n", (int) draft.size(), slot.params.speculative.n_min);
+                } else {
+                    SLT_DBG(slot, "the max possible draft is too small: %d < %d - skipping speculative decoding\n", n_draft_max, slot.params.speculative.n_min);
+                }
+            }
+
             // check if we can batch this slot with the previous one
             if (!slot_batched) {
                 slot_batched = &slot;
@@ -3299,102 +3383,6 @@ struct server_context {
                     metrics.on_prediction(slot);
                     continue;
                 }
-            }
-
-            // do speculative decoding
-            for (auto & slot : slots) {
-                if (!slot.is_processing() || !slot.can_speculate()) {
-                    continue;
-                }
-
-                if (slot.state != SLOT_STATE_GENERATING) {
-                    continue;
-                }
-
-                // determine the max draft that fits the current slot state
-                int n_draft_max = slot.params.speculative.n_max;
-
-                // note: n_past is not yet increased for the `id` token sampled above
-                //       also, need to leave space for 1 extra token to allow context shifts
-                n_draft_max = std::min(n_draft_max, slot.n_ctx - slot.n_past - 2);
-
-                if (slot.n_remaining > 0) {
-                    n_draft_max = std::min(n_draft_max, slot.n_remaining - 1);
-                }
-
-                SLT_DBG(slot, "max possible draft: %d\n", n_draft_max);
-
-                if (n_draft_max < slot.params.speculative.n_min) {
-                    SLT_DBG(slot, "the max possible draft is too small: %d < %d - skipping speculative decoding\n", n_draft_max, slot.params.speculative.n_min);
-
-                    continue;
-                }
-
-                llama_token id = slot.sampled;
-
-                struct common_speculative_params params_spec;
-                params_spec.n_draft   = n_draft_max;
-                params_spec.n_reuse   = llama_n_ctx(slot.ctx_dft) - slot.params.speculative.n_max;
-                params_spec.p_min     = slot.params.speculative.p_min;
-
-                llama_tokens draft = common_speculative_gen_draft(slot.spec, params_spec, slot.cache_tokens, id);
-
-                // keep track of total number of tokens generated in the draft
-                slot.n_draft_total += draft.size();
-
-                // ignore small drafts
-                if (slot.params.speculative.n_min > (int) draft.size()) {
-                    SLT_DBG(slot, "ignoring small draft: %d < %d\n", (int) draft.size(), slot.params.speculative.n_min);
-
-                    continue;
-                }
-
-                // construct the speculation batch
-                common_batch_clear(slot.batch_spec);
-                common_batch_add  (slot.batch_spec, id, slot.n_past, { slot.id }, true);
-
-                for (size_t i = 0; i < draft.size(); ++i) {
-                    common_batch_add(slot.batch_spec, draft[i], slot.n_past + 1 + i, { slot.id }, true);
-                }
-
-                SLT_DBG(slot, "decoding speculative batch, size = %d\n", slot.batch_spec.n_tokens);
-
-                llama_decode(ctx, slot.batch_spec);
-
-                // the accepted tokens from the speculation
-                const auto ids = common_sampler_sample_and_accept_n(slot.smpl, ctx, draft);
-
-                slot.n_past    += ids.size();
-                slot.n_decoded += ids.size();
-
-                // update how many tokens out of draft was accepted
-                slot.n_draft_accepted += ids.size() - 1;
-
-                slot.cache_tokens.push_back(id);
-                slot.cache_tokens.insert(slot.cache_tokens.end(), ids.begin(), ids.end() - 1);
-
-                llama_kv_self_seq_rm(ctx, slot.id, slot.n_past, -1);
-
-                for (size_t i = 0; i < ids.size(); ++i) {
-                    completion_token_output result;
-
-                    result.tok          = ids[i];
-                    result.text_to_send = common_token_to_piece(ctx, result.tok, accept_special_token(slot, result.tok));
-                    result.prob         = 1.0f; // set later
-
-                    // TODO: set result.probs
-
-                    if (!process_token(result, slot)) {
-                        // release slot because of stop condition
-                        slot.release();
-                        slot.print_timings();
-                        send_final_response(slot);
-                        metrics.on_prediction(slot);
-                        break;
-                    }
-                }
-
-                SLT_DBG(slot, "accepted %d/%d draft tokens, new n_past = %d\n", (int) ids.size() - 1, (int) draft.size(), slot.n_past);
             }
         }
 
