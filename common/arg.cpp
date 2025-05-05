@@ -2434,6 +2434,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ));
     add_opt(common_arg(
+        { "-mobs", "--min-offload-batch-size"}, "N",
+        string_format("minimum batch size to offload host tensor operations to device, use 0 to let device backend device decide, -1 to disable. (default: %d)", params.min_offload_batch_size),
+        [](common_params & params, int value) {
+            params.min_offload_batch_size = value;
+        }
+    ).set_env("LLAMA_ARG_MIN_OFFLOAD_BATCH_SIZE"));
+    add_opt(common_arg(
         {"--override-kv"}, "KEY=TYPE:VALUE",
         "advanced option to override model metadata by key. may be specified multiple times.\n"
         "types: int, float, bool, str. example: --override-kv tokenizer.ggml.add_bos_token=bool:false",

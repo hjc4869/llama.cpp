@@ -219,6 +219,7 @@ struct cmd_params {
     std::vector<std::vector<llama_model_tensor_buft_override>> tensor_buft_overrides;
     std::vector<bool>                use_mmap;
     std::vector<bool>                embeddings;
+    std::vector<int>                 min_offload_batch_size;
     ggml_numa_strategy               numa;
     int                              reps;
     ggml_sched_priority              prio;
@@ -230,37 +231,38 @@ struct cmd_params {
 };
 
 static const cmd_params cmd_params_defaults = {
-    /* model                */ { "models/7B/ggml-model-q4_0.gguf" },
-    /* n_prompt             */ { 512 },
-    /* n_gen                */ { 128 },
-    /* n_pg                 */ {},
-    /* n_depth              */ { 0 },
-    /* n_batch              */ { 2048 },
-    /* n_ubatch             */ { 512 },
-    /* type_k               */ { GGML_TYPE_F16 },
-    /* type_v               */ { GGML_TYPE_F16 },
-    /* n_threads            */ { cpu_get_num_math() },
-    /* cpu_mask             */ { "0x0" },
-    /* cpu_strict           */ { false },
-    /* poll                 */ { 50 },
-    /* n_gpu_layers         */ { 99 },
-    /* rpc_servers          */ { "" },
-    /* split_mode           */ { LLAMA_SPLIT_MODE_LAYER },
-    /* main_gpu             */ { 0 },
-    /* no_kv_offload        */ { false },
-    /* flash_attn           */ { false },
-    /* tensor_split         */ { std::vector<float>(llama_max_devices(), 0.0f) },
-    /* tensor_buft_overrides*/ { std::vector<llama_model_tensor_buft_override>{{nullptr,nullptr}} },
-    /* use_mmap             */ { true },
-    /* embeddings           */ { false },
-    /* numa                 */ GGML_NUMA_STRATEGY_DISABLED,
-    /* reps                 */ 5,
-    /* prio                 */ GGML_SCHED_PRIO_NORMAL,
-    /* delay                */ 0,
-    /* verbose              */ false,
-    /* progress             */ false,
-    /* output_format        */ MARKDOWN,
-    /* output_format_stderr */ NONE,
+    /* model                 */ { "models/7B/ggml-model-q4_0.gguf" },
+    /* n_prompt              */ { 512 },
+    /* n_gen                 */ { 128 },
+    /* n_pg                  */ {},
+    /* n_depth               */ { 0 },
+    /* n_batch               */ { 2048 },
+    /* n_ubatch              */ { 512 },
+    /* type_k                */ { GGML_TYPE_F16 },
+    /* type_v                */ { GGML_TYPE_F16 },
+    /* n_threads             */ { cpu_get_num_math() },
+    /* cpu_mask              */ { "0x0" },
+    /* cpu_strict            */ { false },
+    /* poll                  */ { 50 },
+    /* n_gpu_layers          */ { 99 },
+    /* rpc_servers           */ { "" },
+    /* split_mode            */ { LLAMA_SPLIT_MODE_LAYER },
+    /* main_gpu              */ { 0 },
+    /* no_kv_offload         */ { false },
+    /* flash_attn            */ { false },
+    /* tensor_split          */ { std::vector<float>(llama_max_devices(), 0.0f) },
+    /* tensor_buft_overrides */ { std::vector<llama_model_tensor_buft_override>{{nullptr,nullptr}} },
+    /* use_mmap              */ { true },
+    /* embeddings            */ { false },
+    /* min_offload_batch_size*/ { 0 },
+    /* numa                  */ GGML_NUMA_STRATEGY_DISABLED,
+    /* reps                  */ 5,
+    /* prio                  */ GGML_SCHED_PRIO_NORMAL,
+    /* delay                 */ 0,
+    /* verbose               */ false,
+    /* progress              */ false,
+    /* output_format         */ MARKDOWN,
+    /* output_format_stderr  */ NONE,
 };
 
 static void print_usage(int /* argc */, char ** argv) {
@@ -309,6 +311,7 @@ static void print_usage(int /* argc */, char ** argv) {
     printf("  --numa <distribute|isolate|numactl>       (default: disabled)\n");
     printf("  -embd, --embeddings <0|1>                 (default: %s)\n",
            join(cmd_params_defaults.embeddings, ",").c_str());
+    printf("  -mobs, --min-offload-batch-size <i>              (default: 0)\n");
     printf("  -ts, --tensor-split <ts0/ts1/..>          (default: 0)\n");
     printf("  -ot --override-tensors <tensor name pattern>=<buffer type>;... (default: disabled)\n");
     printf("  -r, --repetitions <n>                     (default: %d)\n", cmd_params_defaults.reps);
@@ -588,6 +591,13 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
             }
             auto p = string_split<bool>(argv[i], split_delim);
             params.embeddings.insert(params.embeddings.end(), p.begin(), p.end());
+        } else if (arg == "-mobs" || arg == "--min-offload-batch-size") {
+            if (++i >= argc) {
+                invalid_param = true;
+                break;
+            }
+            auto p = string_split<int>(argv[i], split_delim);
+            params.min_offload_batch_size.insert(params.min_offload_batch_size.end(), p.begin(), p.end());
         } else if (arg == "-ts" || arg == "--tensor-split") {
             if (++i >= argc) {
                 invalid_param = true;
@@ -794,6 +804,9 @@ static cmd_params parse_cmd_params(int argc, char ** argv) {
     if (params.embeddings.empty()) {
         params.embeddings = cmd_params_defaults.embeddings;
     }
+    if (params.min_offload_batch_size.empty()) {
+        params.min_offload_batch_size = cmd_params_defaults.min_offload_batch_size;
+    }
     if (params.n_threads.empty()) {
         params.n_threads = cmd_params_defaults.n_threads;
     }
@@ -833,6 +846,7 @@ struct cmd_params_instance {
     std::vector<llama_model_tensor_buft_override> tensor_buft_overrides;
     bool               use_mmap;
     bool               embeddings;
+    int                min_offload_batch_size;
 
     llama_model_params to_llama_mparams() const {
         llama_model_params mparams = llama_model_default_params();
@@ -894,14 +908,15 @@ struct cmd_params_instance {
     llama_context_params to_llama_cparams() const {
         llama_context_params cparams = llama_context_default_params();
 
-        cparams.n_ctx       = n_prompt + n_gen + n_depth;
-        cparams.n_batch     = n_batch;
-        cparams.n_ubatch    = n_ubatch;
-        cparams.type_k      = type_k;
-        cparams.type_v      = type_v;
-        cparams.offload_kqv = !no_kv_offload;
-        cparams.flash_attn  = flash_attn;
-        cparams.embeddings  = embeddings;
+        cparams.n_ctx                   = n_prompt + n_gen + n_depth;
+        cparams.n_batch                 = n_batch;
+        cparams.n_ubatch                = n_ubatch;
+        cparams.type_k                  = type_k;
+        cparams.type_v                  = type_v;
+        cparams.offload_kqv             = !no_kv_offload;
+        cparams.flash_attn              = flash_attn;
+        cparams.embeddings              = embeddings;
+        cparams.min_offload_batch_size  = min_offload_batch_size;
 
         return cparams;
     }
@@ -921,6 +936,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
     for (const auto & ot : params.tensor_buft_overrides)
     for (const auto & mmp : params.use_mmap)
     for (const auto & embd : params.embeddings)
+    for (const auto & mobs : params.min_offload_batch_size)
     for (const auto & nb : params.n_batch)
     for (const auto & nub : params.n_ubatch)
     for (const auto & tk : params.type_k)
@@ -959,6 +975,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .tensor_buft_overrides = */ ot,
                 /* .use_mmap     = */ mmp,
                 /* .embeddings   = */ embd,
+                /* .min_offload_batch_size = */ mobs,
             };
             instances.push_back(instance);
         }
@@ -990,6 +1007,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .tensor_buft_overrides = */ ot,
                 /* .use_mmap     = */ mmp,
                 /* .embeddings   = */ embd,
+                /* .min_offload_batch_size = */ mobs,
             };
             instances.push_back(instance);
         }
@@ -1021,6 +1039,7 @@ static std::vector<cmd_params_instance> get_cmd_params_instances(const cmd_param
                 /* .tensor_buft_overrides = */ ot,
                 /* .use_mmap     = */ mmp,
                 /* .embeddings   = */ embd,
+                /* .min_offload_batch_size = */ mobs,
             };
             instances.push_back(instance);
         }
@@ -1056,6 +1075,7 @@ struct test {
     std::vector<llama_model_tensor_buft_override> tensor_buft_overrides;
     bool                     use_mmap;
     bool                     embeddings;
+    int                      min_offload_batch_size;
     int                      n_prompt;
     int                      n_gen;
     int                      n_depth;
@@ -1089,6 +1109,7 @@ struct test {
         tensor_buft_overrides = inst.tensor_buft_overrides;
         use_mmap       = inst.use_mmap;
         embeddings     = inst.embeddings;
+        min_offload_batch_size = inst.min_offload_batch_size;
         n_prompt       = inst.n_prompt;
         n_gen          = inst.n_gen;
         n_depth        = inst.n_depth;
@@ -1134,7 +1155,7 @@ struct test {
             "model_type",   "model_size",   "model_n_params", "n_batch",    "n_ubatch",     "n_threads",
             "cpu_mask",     "cpu_strict",   "poll",           "type_k",     "type_v",       "n_gpu_layers",
             "split_mode",   "main_gpu",     "no_kv_offload",  "flash_attn", "tensor_split", "tensor_buft_overrides",
-            "use_mmap",     "embeddings",   "n_prompt",       "n_gen",      "n_depth",      "test_time",
+            "use_mmap",     "embeddings",   "min_offload_batch_size",   "n_prompt",       "n_gen",      "n_depth",      "test_time",
             "avg_ns",       "stddev_ns",    "avg_ts",         "stddev_ts",
         };
         return fields;
@@ -1146,7 +1167,7 @@ struct test {
         if (field == "build_number" || field == "n_batch" || field == "n_ubatch" || field == "n_threads" ||
             field == "poll" || field == "model_size" || field == "model_n_params" || field == "n_gpu_layers" ||
             field == "main_gpu" || field == "n_prompt" || field == "n_gen" || field == "n_depth" ||
-            field == "avg_ns" || field == "stddev_ns") {
+            field == "avg_ns" || field == "stddev_ns" || field == "min_offload_batch_size") {
             return INT;
         }
         if (field == "f16_kv" || field == "no_kv_offload" || field == "cpu_strict" || field == "flash_attn" ||
@@ -1222,6 +1243,7 @@ struct test {
                                             tensor_buft_overrides_str,
                                             std::to_string(use_mmap),
                                             std::to_string(embeddings),
+                                            std::to_string(min_offload_batch_size),
                                             std::to_string(n_prompt),
                                             std::to_string(n_gen),
                                             std::to_string(n_depth),
@@ -1404,6 +1426,9 @@ struct markdown_printer : public printer {
         if (field == "test") {
             return 15;
         }
+        if (field == "min_offload_batch_size") {
+            return 4;
+        }
 
         int width = std::max((int) field.length(), 10);
 
@@ -1434,6 +1459,9 @@ struct markdown_printer : public printer {
         }
         if (field == "embeddings") {
             return "embd";
+        }
+        if (field == "min_offload_batch_size") {
+            return "mobs";
         }
         if (field == "tensor_split") {
             return "ts";
@@ -1502,6 +1530,9 @@ struct markdown_printer : public printer {
         }
         if (params.embeddings.size() > 1 || params.embeddings != cmd_params_defaults.embeddings) {
             fields.emplace_back("embeddings");
+        }
+        if (params.min_offload_batch_size.size() > 1 || params.min_offload_batch_size != cmd_params_defaults.min_offload_batch_size) {
+            fields.emplace_back("min_offload_batch_size");
         }
         fields.emplace_back("test");
         fields.emplace_back("t/s");

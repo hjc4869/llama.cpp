@@ -11,6 +11,7 @@ struct llama_cparams {
     uint32_t n_seq_max;
     int      n_threads;       // number of threads to use for generation
     int      n_threads_batch; // number of threads to use for batch processing
+    int      min_offload_batch_size; // customize minimum batch size for offload_op
 
     float rope_freq_base;
     float rope_freq_scale;

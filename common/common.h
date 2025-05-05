@@ -333,6 +333,8 @@ struct common_params {
     bool warmup            = true;  // warmup run
     bool check_tensors     = false; // validate tensor data
 
+    int32_t min_offload_batch_size = 0; // minimum batch size to offload host tensor operations to device
+
     bool single_turn       = false; // single turn chat conversation
 
     ggml_type cache_type_k = GGML_TYPE_F16; // KV cache data type for the K

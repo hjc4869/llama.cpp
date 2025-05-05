@@ -1138,6 +1138,21 @@ size_t ggml_nbytes_pad(const struct ggml_tensor * tensor) {
     return GGML_PAD(ggml_nbytes(tensor), GGML_MEM_ALIGN);
 }
 
+int64_t ggml_op_batch_size(const struct ggml_tensor * tensor) {
+    switch (tensor->op) {
+        case GGML_OP_GET_ROWS:
+            return 0;
+        case GGML_OP_MUL_MAT:
+            return tensor->ne[1];
+        case GGML_OP_MUL_MAT_ID:
+        case GGML_OP_ROPE:
+        case GGML_OP_ROPE_BACK:
+            return tensor->ne[2];
+        default:
+            return ggml_nrows(tensor);
+    }
+}
+
 int64_t ggml_blck_size(enum ggml_type type) {
     return type_traits[type].blck_size;
 }

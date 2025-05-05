@@ -674,6 +674,8 @@ struct ggml_backend_sched {
     char * context_buffer;
     size_t context_buffer_size;
 
+    int min_offload_batch_size;
+
     int debug;
 };
 
@@ -765,8 +767,10 @@ static int ggml_backend_sched_backend_id_from_cur(ggml_backend_sched_t sched, st
         // not an ideal solution
         if (tensor->op != GGML_OP_ROPE && src->buffer != NULL && src->buffer->usage == GGML_BACKEND_BUFFER_USAGE_WEIGHTS) {
             int src_backend_id = ggml_backend_sched_backend_from_buffer(sched, src, tensor);
+            int batch_size = ggml_op_batch_size(tensor);
             // check if a backend with higher prio wants to offload the op
-            if (src_backend_id == sched->n_backends - 1 && ggml_backend_buffer_is_host(src->buffer)) {
+            if (sched->min_offload_batch_size >= 0 && batch_size > sched->min_offload_batch_size &&
+                src_backend_id == sched->n_backends - 1 && ggml_backend_buffer_is_host(src->buffer)) {
                 for (int b = 0; b < src_backend_id; b++) {
                     if (ggml_backend_supports_op(sched->backends[b], tensor) && ggml_backend_offload_op(sched->backends[b], tensor)) {
                         SET_CAUSE(tensor, "1.off");
@@ -1639,6 +1643,10 @@ ggml_backend_t ggml_backend_sched_get_tensor_backend(ggml_backend_sched_t sched,
         return NULL;
     }
     return sched->backends[backend_index];
+}
+
+void ggml_backend_sched_set_min_offload_batch_size(ggml_backend_sched_t sched, int batch_size) {
+    sched->min_offload_batch_size = batch_size;
 }
 
 // utils

@@ -3247,25 +3247,10 @@ static bool ggml_backend_cuda_device_supports_buft(ggml_backend_dev_t dev, ggml_
     return (ggml_backend_buft_is_cuda(buft) || ggml_backend_buft_is_cuda_split(buft)) && buft->device == dev;
 }
 
-static int64_t get_op_batch_size(const ggml_tensor * op) {
-    switch (op->op) {
-        case GGML_OP_GET_ROWS:
-            return 0;
-        case GGML_OP_MUL_MAT:
-            return op->ne[1];
-        case GGML_OP_MUL_MAT_ID:
-        case GGML_OP_ROPE:
-        case GGML_OP_ROPE_BACK:
-            return op->ne[2];
-        default:
-            return ggml_nrows(op);
-    }
-}
-
 static bool ggml_backend_cuda_device_offload_op(ggml_backend_dev_t dev, const ggml_tensor * op) {
     const int min_batch_size = 32;
 
-    return get_op_batch_size(op) >= min_batch_size;
+    return ggml_op_batch_size(op) >= min_batch_size;
 
     GGML_UNUSED(dev);
 }

@@ -1089,31 +1089,32 @@ struct llama_model_params common_model_params_to_llama(common_params & params) {
 struct llama_context_params common_context_params_to_llama(const common_params & params) {
     auto cparams = llama_context_default_params();
 
-    cparams.n_ctx             = params.n_ctx;
-    cparams.n_seq_max         = params.n_parallel;
-    cparams.n_batch           = params.n_batch;
-    cparams.n_ubatch          = params.n_ubatch;
-    cparams.n_threads         = params.cpuparams.n_threads;
-    cparams.n_threads_batch   = params.cpuparams_batch.n_threads == -1 ?
-                                params.cpuparams.n_threads : params.cpuparams_batch.n_threads;
-    cparams.logits_all        = params.logits_all;
-    cparams.embeddings        = params.embedding;
-    cparams.rope_scaling_type = params.rope_scaling_type;
-    cparams.rope_freq_base    = params.rope_freq_base;
-    cparams.rope_freq_scale   = params.rope_freq_scale;
-    cparams.yarn_ext_factor   = params.yarn_ext_factor;
-    cparams.yarn_attn_factor  = params.yarn_attn_factor;
-    cparams.yarn_beta_fast    = params.yarn_beta_fast;
-    cparams.yarn_beta_slow    = params.yarn_beta_slow;
-    cparams.yarn_orig_ctx     = params.yarn_orig_ctx;
-    cparams.pooling_type      = params.pooling_type;
-    cparams.attention_type    = params.attention_type;
-    cparams.defrag_thold      = params.defrag_thold;
-    cparams.cb_eval           = params.cb_eval;
-    cparams.cb_eval_user_data = params.cb_eval_user_data;
-    cparams.offload_kqv       = !params.no_kv_offload;
-    cparams.flash_attn        = params.flash_attn;
-    cparams.no_perf           = params.no_perf;
+    cparams.n_ctx                  = params.n_ctx;
+    cparams.n_seq_max              = params.n_parallel;
+    cparams.n_batch                = params.n_batch;
+    cparams.n_ubatch               = params.n_ubatch;
+    cparams.n_threads              = params.cpuparams.n_threads;
+    cparams.n_threads_batch        = params.cpuparams_batch.n_threads == -1 ?
+                                     params.cpuparams.n_threads : params.cpuparams_batch.n_threads;
+    cparams.logits_all             = params.logits_all;
+    cparams.embeddings             = params.embedding;
+    cparams.rope_scaling_type      = params.rope_scaling_type;
+    cparams.rope_freq_base         = params.rope_freq_base;
+    cparams.rope_freq_scale        = params.rope_freq_scale;
+    cparams.yarn_ext_factor        = params.yarn_ext_factor;
+    cparams.yarn_attn_factor       = params.yarn_attn_factor;
+    cparams.yarn_beta_fast         = params.yarn_beta_fast;
+    cparams.yarn_beta_slow         = params.yarn_beta_slow;
+    cparams.yarn_orig_ctx          = params.yarn_orig_ctx;
+    cparams.pooling_type           = params.pooling_type;
+    cparams.attention_type         = params.attention_type;
+    cparams.defrag_thold           = params.defrag_thold;
+    cparams.cb_eval                = params.cb_eval;
+    cparams.cb_eval_user_data      = params.cb_eval_user_data;
+    cparams.offload_kqv            = !params.no_kv_offload;
+    cparams.flash_attn             = params.flash_attn;
+    cparams.no_perf                = params.no_perf;
+    cparams.min_offload_batch_size = params.min_offload_batch_size;
 
     if (params.reranking) {
         cparams.embeddings    = true;

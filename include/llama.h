@@ -364,6 +364,8 @@ extern "C" {
         // currently works only with CPU execution
         ggml_abort_callback abort_callback;
         void *              abort_callback_data;
+
+        int min_offload_batch_size; // customize minimum batch size for offload_op
     };
 
     // model quantization parameters
