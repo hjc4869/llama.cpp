@@ -1,10 +1,17 @@
-#if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA) && CUDART_VERSION >= 11070
+#if !defined(GGML_USE_MUSA) && (CUDART_VERSION >= 11070 || defined(GGML_USE_HIP))
 #define USE_CUB
-#endif // !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA) && CUDART_VERSION >= 11070
+#endif // !defined(GGML_USE_MUSA) && (CUDART_VERSION >= 11070 || defined(GGML_USE_HIP))
 
 #ifdef USE_CUB
+
+#if defined(GGML_USE_HIP)
+#include <hipcub/hipcub.hpp>
+using namespace hipcub;
+#else
 #include <cub/cub.cuh>
 using namespace cub;
+#endif // defined(GGML_USE_HIP)
+
 #endif // USE_CUB
 
 #include "sumrows.cuh"
@@ -20,7 +27,6 @@ void sum_f32_cuda(ggml_cuda_pool & pool, const float * x, float * dst, const int
     DeviceReduce::Sum(tmp_alloc.ptr, tmp_size, x, dst, ne, stream);
 #else
     // Use (inefficient) sum_rows implementation as a fallback.
-    // For AMD there is rocPRIM which could be used as a drop-in replacement via hipcub but this would require C++11 -> C++14.
     sum_rows_f32_cuda(x, dst, ne, 1, stream);
     GGML_UNUSED(pool);
 #endif // USE_CUB
