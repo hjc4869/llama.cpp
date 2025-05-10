@@ -1,11 +1,17 @@
 #include "argsort.cuh"
 
 #ifdef GGML_CUDA_USE_CUB
+#if defined(GGML_USE_HIP)
+#include <hipcub/hipcub.hpp>
+using namespace hipcub;
+#else
 #    include <cub/cub.cuh>
 #    if (CCCL_MAJOR_VERSION >= 3 && CCCL_MINOR_VERSION >= 1)
 #        define STRIDED_ITERATOR_AVAILABLE
 #    endif
 using namespace cub;
+#endif // GGML_USE_HIP
+
 #endif  // GGML_CUDA_USE_CUB
 
 static __global__ void init_indices(int * indices, const int ncols, const int nrows) {
