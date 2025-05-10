@@ -2,11 +2,16 @@
 #include "top-k.cuh"
 
 #ifdef GGML_CUDA_USE_CUB
+#if defined(GGML_USE_HIP)
+#include <hipcub/hipcub.hpp>
+using namespace hipcub;
+#else
 #    include <cub/cub.cuh>
 #    if (CCCL_MAJOR_VERSION >= 3 && CCCL_MINOR_VERSION >= 2)
 #        define CUB_TOP_K_AVAILABLE
 using namespace cub;
 #    endif  // CCCL_MAJOR_VERSION >= 3 && CCCL_MINOR_VERSION >= 2
+#endif      // GGML_USE_HIP
 #endif      // GGML_CUDA_USE_CUB
 
 #ifdef CUB_TOP_K_AVAILABLE
