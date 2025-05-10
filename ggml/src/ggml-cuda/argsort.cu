@@ -1,8 +1,14 @@
 #include "argsort.cuh"
 
 #ifdef GGML_CUDA_USE_CUB
+#if defined(GGML_USE_HIP)
+#include <hipcub/hipcub.hpp>
+using namespace hipcub;
+#else
 #    include <cub/cub.cuh>
 using namespace cub;
+#endif // GGML_USE_HIP
+
 #endif  // GGML_CUDA_USE_CUB
 
 static __global__ void init_indices(int * indices, const int ncols, const int nrows) {
