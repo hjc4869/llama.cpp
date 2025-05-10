@@ -323,7 +323,7 @@ jobs:
         id: depends
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git cmake rocblas-dev hipblas-dev libcurl4-openssl-dev
+          sudo apt-get install -y build-essential git cmake rocblas-dev hipblas-dev hipcub-dev libcurl4-openssl-dev
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.16
