@@ -1,13 +1,20 @@
-#if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA) && CUDART_VERSION >= 11070
+#if defined(GGML_USE_HIP) || (!defined(GGML_USE_MUSA) && CUDART_VERSION >= 11070)
 #define USE_CUB
-#endif // !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA) && CUDART_VERSION >= 11070
-
-#ifdef USE_CUB
-#include <cub/cub.cuh>
-using namespace cub;
-#endif // USE_CUB
+#endif // defined(GGML_USE_HIP) || (!defined(GGML_USE_MUSA) && CUDART_VERSION >= 11070)
 
 #include "ssm-scan.cuh"
+
+#ifdef USE_CUB
+
+#if defined(GGML_USE_HIP)
+#include <hipcub/hipcub.hpp>
+using namespace hipcub;
+#else
+#include <cub/cub.cuh>
+using namespace cub;
+#endif // GGML_USE_HIP
+
+#endif // USE_CUB
 
 // We would like to keep pragma unroll for cases where L_template is not 0,
 // so we suppress the clang transformation warning.
@@ -48,8 +55,8 @@ __global__ void __launch_bounds__(splitD, 1)
     __shared__ float smemC[N];
 
 #ifdef USE_CUB
-    using BlockLoad = cub::BlockLoad<float, splitD, N, cub::BLOCK_LOAD_WARP_TRANSPOSE>;
-    using BlockStore = cub::BlockStore<float, splitD, N, cub::BLOCK_STORE_WARP_TRANSPOSE>;
+    using BlockLoad = BlockLoad<float, splitD, N, BLOCK_LOAD_WARP_TRANSPOSE>;
+    using BlockStore = BlockStore<float, splitD, N, BLOCK_STORE_WARP_TRANSPOSE>;
 
     union CubTempStorage {
         typename BlockLoad::TempStorage load_temp;
