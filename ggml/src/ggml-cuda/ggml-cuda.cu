@@ -62,6 +62,9 @@
 #include <vector>
 
 static_assert(sizeof(half) == sizeof(ggml_fp16_t), "wrong fp16 size");
+#if !defined(GGML_USE_HIP)
+ggml_backend_reg_t ggml_backend_cuda_reg();
+#endif
 
 [[noreturn]]
 void ggml_cuda_error(const char * stmt, const char * func, const char * file, int line, const char * msg) {
@@ -97,10 +100,10 @@ int ggml_cuda_get_device() {
 static cudaError_t ggml_cuda_device_malloc(void ** ptr, size_t size, int device) {
     ggml_cuda_set_device(device);
     cudaError_t err;
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
     if (getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY") != nullptr)
     {
         err = cudaMallocManaged(ptr, size);
-#if defined(GGML_USE_HIP)
         if (err == hipSuccess) {
             CUDA_CHECK(cudaMemAdvise(*ptr, size, hipMemAdviseSetCoarseGrain, device));
         }
@@ -115,9 +118,9 @@ static cudaError_t ggml_cuda_device_malloc(void ** ptr, size_t size, int device)
 
             err = cudaMalloc(ptr, size);
         }
-#endif // defined(GGML_USE_HIP)
     }
     else
+#endif // defined(GGML_USE_HIP)
     {
         err = cudaMalloc(ptr, size);
     }
@@ -714,7 +717,11 @@ ggml_backend_buffer_type_t ggml_backend_cuda_buffer_type(int device) {
         for (int i = 0; i < ggml_backend_cuda_get_device_count(); i++) {
             ggml_backend_cuda_buffer_types[i] = {
                 /* .iface    = */ ggml_backend_cuda_buffer_type_interface,
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
+                /* .device   = */ ggml_backend_reg_dev_get(ggml_backend_hip_reg(), i),
+#else
                 /* .device   = */ ggml_backend_reg_dev_get(ggml_backend_cuda_reg(), i),
+#endif
                 /* .context  = */ new ggml_backend_cuda_buffer_type_context{i, GGML_CUDA_NAME + std::to_string(i)},
             };
         }
@@ -1049,7 +1056,11 @@ ggml_backend_buffer_type_t ggml_backend_cuda_split_buffer_type(int main_device, 
 
     struct ggml_backend_buffer_type buft {
         /* .iface   = */ ggml_backend_cuda_split_buffer_type_interface,
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
+        /* .device  = */ ggml_backend_reg_dev_get(ggml_backend_hip_reg(), main_device),
+#else
         /* .device  = */ ggml_backend_reg_dev_get(ggml_backend_cuda_reg(), main_device),
+#endif
         /* .context = */ ctx,
     };
 
@@ -1112,7 +1123,11 @@ ggml_backend_buffer_type_t ggml_backend_cuda_host_buffer_type() {
             /* .get_alloc_size   = */ ggml_backend_cpu_buffer_type()->iface.get_alloc_size,
             /* .is_host          = */ ggml_backend_cpu_buffer_type()->iface.is_host,
         },
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
+        /* .device   = */ ggml_backend_reg_dev_get(ggml_backend_hip_reg(), 0),
+#else
         /* .device   = */ ggml_backend_reg_dev_get(ggml_backend_cuda_reg(), 0),
+#endif
         /* .context  = */ nullptr,
     };
 
@@ -3435,7 +3450,11 @@ static const ggml_backend_reg_i ggml_backend_cuda_reg_interface = {
 };
 
 // backend registry
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
+ggml_backend_reg_t ggml_backend_hip_reg() {
+#else
 ggml_backend_reg_t ggml_backend_cuda_reg() {
+#endif
     static ggml_backend_reg reg;
     static bool initialized = false;
 
@@ -3491,11 +3510,19 @@ ggml_backend_t ggml_backend_cuda_init(int device) {
     ggml_backend_t cuda_backend = new ggml_backend {
         /* .guid      = */ ggml_backend_cuda_guid(),
         /* .interface = */ ggml_backend_cuda_interface,
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
+        /* .device    = */ ggml_backend_reg_dev_get(ggml_backend_hip_reg(), device),
+#else
         /* .device    = */ ggml_backend_reg_dev_get(ggml_backend_cuda_reg(), device),
+#endif
         /* .context   = */ ctx,
     };
 
     return cuda_backend;
 }
 
+#if defined(GGML_USE_HIP) && defined(__HIPCC__)
+GGML_BACKEND_DL_IMPL(ggml_backend_hip_reg)
+#else
 GGML_BACKEND_DL_IMPL(ggml_backend_cuda_reg)
+#endif
