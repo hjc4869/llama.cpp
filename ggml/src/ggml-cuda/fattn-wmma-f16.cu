@@ -11,6 +11,12 @@
 #include <mma.h>
 namespace wmma = nvcuda::wmma;
 #elif defined(GGML_HIP_ROCWMMA_FATTN) && defined(FP16_MMA_AVAILABLE)
+// Workaround for gfx*-generic
+#if defined(__gfx11_generic__)
+#define __gfx1100__ __gfx11_generic__
+#elif defined(__gfx12_generic__)
+#define __gfx1201__ __gfx12_generic__
+#endif
 #undef HIP_ENABLE_WARP_SYNC_BUILTINS // conflicts with rocWMMA headers
 #include <rocwmma/rocwmma.hpp>
 namespace wmma = rocwmma;
