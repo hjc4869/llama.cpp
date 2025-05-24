@@ -16,8 +16,7 @@ FROM ${BASE_ROCM_DEV_CONTAINER} AS build
 # gfx803, gfx900, gfx906, gfx1032, gfx1101, gfx1102,not officialy supported
 # check https://rocm.docs.amd.com/projects/install-on-linux/en/docs-6.4.1/reference/system-requirements.html
 
-ARG ROCM_DOCKER_ARCH='gfx803;gfx900;gfx906;gfx908;gfx90a;gfx942;gfx1010;gfx1030;gfx1032;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1151'
-#ARG ROCM_DOCKER_ARCH='gfx1151'
+ARG ROCM_DOCKER_ARCH='gfx10-1-generic;gfx10-3-generic;gfx11-generic;gfx12-generic'
 
 # Set ROCm architectures
 ENV AMDGPU_TARGETS=${ROCM_DOCKER_ARCH}
@@ -39,7 +38,7 @@ RUN HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
     cmake -S . -B build \
         -DGGML_HIP=ON \
         -DGGML_HIP_ROCWMMA_FATTN=ON \
-        -DAMDGPU_TARGETS="$ROCM_DOCKER_ARCH" \
+        -DCMAKE_HIP_ARCHITECTURES="$ROCM_DOCKER_ARCH" \
         -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
         -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TESTS=OFF \
     && cmake --build build --config Release -j$(nproc)
