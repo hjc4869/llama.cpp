@@ -115,29 +115,28 @@ int ggml_cuda_get_device() {
 
 static cudaError_t ggml_cuda_device_malloc(void ** ptr, size_t size, int device) {
     ggml_cuda_set_device(device);
-    cudaError_t err;
-    if (getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY") != nullptr) {
-        err = cudaMallocManaged(ptr, size);
-#if defined(GGML_USE_HIP)
-        if (err == hipSuccess) {
-            CUDA_CHECK(cudaMemAdvise(*ptr, size, hipMemAdviseSetCoarseGrain, device));
-        }
-
-        // fall back to cudaMalloc if not supported (e.g. on Windows)
-        if (err == hipErrorNotSupported) {
-            static bool warned_unsupported = false;
-            if (!warned_unsupported) {
-                GGML_LOG_WARN("hipMallocManaged unsupported, falling back to hipMalloc.\n");
-                warned_unsupported = true;
-            }
-
-            err = cudaMalloc(ptr, size);
-        }
-#endif // defined(GGML_USE_HIP)
-    } else {
-        err = cudaMalloc(ptr, size);
+    auto device_info = ggml_cuda_info().devices[device];
+    bool prefer_managed = device_info.integrated;
+    char * uma_optin = getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY");
+    if (uma_optin != nullptr) {
+        prefer_managed = std::string(uma_optin) == "1";
     }
-    return err;
+
+    if (device_info.managed_memory || uma_optin != nullptr) {
+        if (prefer_managed) {
+            cudaError_t err = cudaMallocManaged(ptr, size);
+
+#if defined(GGML_USE_HIP)
+            if (err == hipSuccess) {
+                CUDA_CHECK(cudaMemAdvise(*ptr, size, hipMemAdviseSetCoarseGrain, device));
+            }
+#endif // defined(GGML_USE_HIP)
+
+            return err;
+        }
+    }
+
+    return cudaMalloc(ptr, size);
 }
 
 #if defined(GGML_USE_HIP)
@@ -237,10 +236,11 @@ static ggml_cuda_device_info ggml_cuda_init() {
 
         info.default_tensor_split[id] = total_vram;
         total_vram += prop.totalGlobalMem;
-        info.devices[id].integrated = false; // Temporarily disabled due to issues with corrupted output (e.g. #15034)
-        info.devices[id].nsm        = prop.multiProcessorCount;
-        info.devices[id].smpb       = prop.sharedMemPerBlock;
-        info.devices[id].warp_size  = prop.warpSize;
+        info.devices[id].integrated     = prop.integrated;
+        info.devices[id].managed_memory = prop.managedMemory;
+        info.devices[id].nsm            = prop.multiProcessorCount;
+        info.devices[id].smpb           = prop.sharedMemPerBlock;
+        info.devices[id].warp_size      = prop.warpSize;
 #if defined(GGML_USE_HIP)
         info.devices[id].smpbo = prop.sharedMemPerBlock;
 
