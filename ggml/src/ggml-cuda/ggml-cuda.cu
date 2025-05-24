@@ -96,32 +96,29 @@ int ggml_cuda_get_device() {
 
 static cudaError_t ggml_cuda_device_malloc(void ** ptr, size_t size, int device) {
     ggml_cuda_set_device(device);
-    cudaError_t err;
-    if (getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY") != nullptr)
-    {
-        err = cudaMallocManaged(ptr, size);
+    cudaDeviceProp devProp;
+    CUDA_CHECK(cudaGetDeviceProperties(&devProp, device));
+    if (devProp.managedMemory) {
+        bool preferManaged = devProp.integrated;
+        char * umaEnv = getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY");
+        if (umaEnv != nullptr) {
+            preferManaged = std::string(umaEnv) == "1";
+        }
+
+        if (preferManaged) {
+            cudaError_t err = cudaMallocManaged(ptr, size);
+
 #if defined(GGML_USE_HIP)
-        if (err == hipSuccess) {
-            CUDA_CHECK(cudaMemAdvise(*ptr, size, hipMemAdviseSetCoarseGrain, device));
-        }
-
-        // fall back to cudaMalloc if not supported (e.g. on Windows)
-        if (err == hipErrorNotSupported) {
-            static bool warned_unsupported = false;
-            if (!warned_unsupported) {
-                GGML_LOG_WARN("hipMallocManaged unsupported, falling back to hipMalloc.\n");
-                warned_unsupported = true;
+            if (err == hipSuccess) {
+                CUDA_CHECK(cudaMemAdvise(*ptr, size, hipMemAdviseSetCoarseGrain, device));
             }
-
-            err = cudaMalloc(ptr, size);
-        }
 #endif // defined(GGML_USE_HIP)
+
+            return err;
+        }
     }
-    else
-    {
-        err = cudaMalloc(ptr, size);
-    }
-    return err;
+
+    return cudaMalloc(ptr, size);
 }
 
 #if defined(GGML_USE_HIP) && defined(__HIP_PLATFORM_AMD__)
