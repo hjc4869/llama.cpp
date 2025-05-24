@@ -15,6 +15,12 @@ namespace wmma = mtmusa::wmma;
 namespace wmma = nvcuda::wmma;
 #endif // GGML_USE_MUSA
 #elif defined(GGML_USE_HIP)
+// Workaround for gfx*-generic
+#if defined(__gfx11_generic__)
+#define __gfx1100__ __gfx11_generic__
+#elif defined(__gfx12_generic__)
+#define __gfx1201__ __gfx12_generic__
+#endif
 #include <rocwmma/rocwmma.hpp>
 namespace wmma = rocwmma;
 #endif // !defined(GGML_USE_HIP)
