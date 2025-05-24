@@ -190,11 +190,12 @@
 #endif
 
 #if defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) || defined(__gfx1033__) || \
-    defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__) || defined(__gfx1037__)
+    defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__) || defined(__gfx1037__) || \
+    defined(__gfx10_3_generic__)
 #define RDNA2
 #endif
 
-#if defined(__gfx1010__) || defined(__gfx1012__)
+#if defined(__gfx1010__) || defined(__gfx1012__) || defined(__gfx10_1_generic__)
 #define RDNA1
 #endif
 
