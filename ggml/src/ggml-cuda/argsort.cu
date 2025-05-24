@@ -3,6 +3,16 @@
 #ifdef GGML_CUDA_USE_CUB
 #if defined(GGML_USE_HIP)
 
+// Workaround for gfx*-generic
+#if defined(__gfx10_1_generic__)
+#define __gfx1010__ __gfx10_1_generic__
+#elif defined(__gfx10_3_generic__)
+#define __gfx1030__ __gfx10_3_generic__
+#elif defined(__gfx11_generic__)
+#define __gfx1100__ __gfx11_generic__
+#elif defined(__gfx12_generic__)
+#define __gfx1201__ __gfx12_generic__
+#endif
 
 #include <hipcub/hipcub.hpp>
 using namespace hipcub;
