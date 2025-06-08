@@ -1,11 +1,13 @@
 #include "llama-model-loader.h"
 
 #include "ggml.h"
+#include "llama-mmap.h"
 
 #include <array>
 #include <cinttypes>
 #include <cstring>
 #include <future>
+#include <memory>
 
 static const size_t kiB = 1024;
 static const size_t MiB = 1024*kiB;
@@ -470,6 +472,7 @@ llama_model_loader::llama_model_loader(
         std::vector<std::string> & splits,
         bool use_mmap,
         bool check_tensors,
+        int load_threads,
         const llama_model_kv_override * param_overrides_p,
         const llama_model_tensor_buft_override * param_tensor_buft_overrides_p) {
     int trace = 0;
@@ -500,7 +503,13 @@ llama_model_loader::llama_model_loader(
     get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
     llm_kv = LLM_KV(llm_arch_from_string(arch_name));
 
-    files.emplace_back(new llama_file(fname.c_str(), "rb"));
+    n_load_threads = load_threads;
+    std::vector<std::unique_ptr<llama_file>> fds;
+    for (int i = 0; i < n_load_threads; i++) {
+        fds.emplace_back(new llama_file(fname.c_str(), "rb"));
+    }
+
+    files.emplace_back(std::move(fds));
     contexts.emplace_back(ctx);
 
     // Save tensors data offset of the main file.
@@ -514,7 +523,7 @@ llama_model_loader::llama_model_loader(
         }
         n_elements += ggml_nelements(cur);
         n_bytes    += ggml_nbytes(cur);
-        weights_map.emplace(tensor_name, llama_tensor_weight(files.back().get(), 0, meta.get(), cur));
+        weights_map.emplace(tensor_name, llama_tensor_weight(files.back().back().get(), 0, meta.get(), cur));
     }
     uint16_t n_split = 0;
     get_key(llm_kv(LLM_KV_SPLIT_COUNT), n_split, false);
@@ -568,7 +577,12 @@ llama_model_loader::llama_model_loader(
                 }
             }
 
-            files.emplace_back(new llama_file(fname_split, "rb"));
+            std::vector<std::unique_ptr<llama_file>> fss(n_load_threads);
+            for (int i = 0; i < n_load_threads; i++) {
+                fss.emplace_back(new llama_file(fname_split, "rb"));
+            }
+
+            files.emplace_back(std::move(fss));
             contexts.emplace_back(ctx);
 
             // Save tensors data offset info of the shard.
@@ -580,7 +594,7 @@ llama_model_loader::llama_model_loader(
                 }
                 n_elements += ggml_nelements(cur);
                 n_bytes    += ggml_nbytes(cur);
-                weights_map.emplace(tensor_name, llama_tensor_weight(files.back().get(), idx, ctx_gguf.get(), cur));
+                weights_map.emplace(tensor_name, llama_tensor_weight(files.back().back().get(), idx, ctx_gguf.get(), cur));
             }
         }
 
@@ -858,7 +872,7 @@ void llama_model_loader::init_mappings(bool prefetch, llama_mlocks * mlock_mmaps
                 }
             }
 
-            std::unique_ptr<llama_mmap> mapping = std::make_unique<llama_mmap>(file.get(), prefetch ? -1 : 0, is_numa);
+            std::unique_ptr<llama_mmap> mapping = std::make_unique<llama_mmap>(file.back().get(), prefetch ? -1 : 0, is_numa);
             mmaps_used.emplace_back(mapping->size(), 0);
             if (mlock_mmaps) {
                 std::unique_ptr<llama_mlock> mlock_mmap(new llama_mlock());
@@ -906,8 +920,8 @@ void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
         GGML_ASSERT(cur->data != nullptr);
         GGML_ASSERT(w.idx < files.size());
         const auto & file = files.at(w.idx);
-        file->seek(w.offs, SEEK_SET);
-        file->read_raw(cur->data, ggml_nbytes(cur));
+        file.back()->seek(w.offs, SEEK_SET);
+        file.back()->read_raw(cur->data, ggml_nbytes(cur));
     }
 
     if (check_tensors && !ggml_validate_row_data(cur->type, cur->data, ggml_nbytes(cur))) {
@@ -1015,22 +1029,22 @@ bool llama_model_loader::load_all_data(
             ggml_backend_name(upload_backend));
     }
 
-    for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
-        const auto * weight = get_weight(ggml_get_name(cur));
-        if (weight == nullptr) {
-            // this can happen with split experts models
-            continue;
-        }
-
-        if (progress_callback) {
-            if (!progress_callback((float) size_done / size_data, progress_callback_user_data)) {
-                return false;
+    if (use_mmap) {
+        for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+            const auto * weight = get_weight(ggml_get_name(cur));
+            if (weight == nullptr) {
+                // this can happen with split experts models
+                continue;
             }
-        }
 
-        size_t n_size = ggml_nbytes(cur);
+            if (progress_callback) {
+                if (!progress_callback((float) size_done / size_data, progress_callback_user_data)) {
+                    return false;
+                }
+            }
 
-        if (use_mmap) {
+            size_t n_size = ggml_nbytes(cur);
+
             const auto & mapping = mappings.at(weight->idx);
             ggml_backend_buffer_t buf_mmap = nullptr;
             if (bufs.count(weight->idx)) {
@@ -1058,48 +1072,80 @@ bool llama_model_loader::load_all_data(
             } else {
                 ggml_backend_tensor_set(cur, data, 0, n_size);
             }
-        } else {
-            const auto & file = files.at(weight->idx);
-            if (ggml_backend_buffer_is_host(cur->buffer)) {
-                file->seek(weight->offs, SEEK_SET);
-                file->read_raw(cur->data, n_size);
-                if (check_tensors) {
-                    validation_result.emplace_back(std::async(std::launch::async, [cur, n_size] {
-                        return std::make_pair(cur, ggml_validate_row_data(cur->type, cur->data, n_size));
-                    }));
-                }
-            } else {
-                // If upload_backend is valid load the tensor in chunks to pinned memory and upload the buffers asynchronously to the GPU.
-                if (upload_backend) {
-                    file->seek(weight->offs, SEEK_SET);
 
-                    size_t bytes_read = 0;
+            size_done += n_size;
+        }
+    } else {
+        std::vector<struct ggml_tensor*> tensors;
+        for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+            const auto * weight = get_weight(ggml_get_name(cur));
+            if (weight == nullptr) {
+                // this can happen with split experts models
+                continue;
+            }
 
-                    while (bytes_read < n_size) {
-                        size_t read_iteration = std::min<size_t>(buffer_size, n_size - bytes_read);
-
-                        ggml_backend_event_synchronize(events[buffer_idx]);
-                        file->read_raw(host_ptrs[buffer_idx], read_iteration);
-                        ggml_backend_tensor_set_async(upload_backend, cur, host_ptrs[buffer_idx], bytes_read, read_iteration);
-                        ggml_backend_event_record(events[buffer_idx], upload_backend);
-
-                        bytes_read += read_iteration;
-                        ++buffer_idx;
-                        buffer_idx %= n_buffers;
-                    }
-                } else {
-                    read_buf.resize(n_size);
-                    file->seek(weight->offs, SEEK_SET);
-                    file->read_raw(read_buf.data(), n_size);
-                    ggml_backend_tensor_set(cur, read_buf.data(), 0, n_size);
-                    if (check_tensors && !ggml_validate_row_data(cur->type, read_buf.data(), n_size)) {
-                        throw std::runtime_error(format("tensor '%s' has invalid data", ggml_get_name(cur)));
-                    }
+            tensors.emplace_back(cur);
+            if (progress_callback) {
+                if (!progress_callback((float) size_done / size_data, progress_callback_user_data)) {
+                    return false;
                 }
             }
+
+            size_t n_size = ggml_nbytes(cur);
+            size_done += n_size;
         }
 
-        size_done += n_size;
+        std::mutex lock;
+        int per_thread = tensors.size() / n_load_threads;
+        std::vector<std::thread> load_threads;
+        for (int i = 0; i < n_load_threads; i++) {
+            load_threads.emplace_back(std::thread([&](int thread_index, int start, int end){
+                std::vector<no_init<uint8_t>> local_read_buf(buffer_size);
+                for (int j = start; j < end; j++) {
+                    auto& cur = tensors[j];
+                    const auto * weight = get_weight(ggml_get_name(cur));
+                    size_t n_size = ggml_nbytes(cur);
+                    auto & file = files.at(weight->idx).at(thread_index);
+
+                    file->seek(weight->offs, SEEK_SET);
+                    size_t bytes_read = 0;
+                    while (bytes_read < n_size) {
+                        size_t read_iteration = std::min<size_t>(buffer_size, n_size - bytes_read);
+                        if (ggml_backend_buffer_is_host(cur->buffer)) {
+                            file->read_raw((unsigned char*)cur->data + bytes_read, read_iteration);
+                        } else {
+                            file->read_raw(local_read_buf.data(), read_iteration);
+                            if (upload_backend) {
+                                std::lock_guard<std::mutex> guard(lock);
+                                ggml_backend_event_synchronize(events[buffer_idx]);
+                                memcpy(host_ptrs[buffer_idx], local_read_buf.data(), read_iteration);
+                                ggml_backend_tensor_set_async(upload_backend, cur, host_ptrs[buffer_idx], bytes_read, read_iteration);
+                                ggml_backend_event_record(events[buffer_idx], upload_backend);
+                                ++buffer_idx;
+                                buffer_idx %= n_buffers;
+                            } else {
+                                ggml_backend_tensor_set(cur, local_read_buf.data(), bytes_read, read_iteration);
+                            }
+                        }
+
+                        bytes_read += read_iteration;
+                    }
+
+                    if (ggml_backend_buffer_is_host(cur->buffer)) {
+                        if (check_tensors) {
+                            std::lock_guard<std::mutex> guard(lock);
+                            validation_result.emplace_back(std::async(std::launch::async, [cur, n_size] {
+                                return std::make_pair(cur, ggml_validate_row_data(cur->type, cur->data, n_size));
+                            }));
+                        }
+                    }
+                }
+            }, i, i * per_thread, i == n_load_threads - 1 ? tensors.size() : ((i + 1) * per_thread)));
+        }
+
+        for (auto & t : load_threads) {
+            t.join();
+        }
     }
 
     // free temporary resources used for async uploads

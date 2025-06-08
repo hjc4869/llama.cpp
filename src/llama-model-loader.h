@@ -10,8 +10,10 @@
 
 #include <cstddef>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 using llama_buf_map = std::unordered_map<uint32_t, ggml_backend_buffer_t>;
 
@@ -61,9 +63,10 @@ struct llama_model_loader {
     static const int TENSOR_NOT_REQUIRED = 1;
     static const int TENSOR_DUPLICATED   = 2;
 
-    int n_kv      = 0;
-    int n_tensors = 0;
-    int n_created = 0;
+    int n_kv           = 0;
+    int n_tensors      = 0;
+    int n_created      = 0;
+    int n_load_threads = 0;
 
     uint64_t n_elements = 0;
     size_t   n_bytes    = 0;
@@ -96,6 +99,7 @@ struct llama_model_loader {
         std::vector<std::string> & splits, // optional, only need if the split does not follow naming scheme
         bool use_mmap,
         bool check_tensors,
+        int load_threads,
         const llama_model_kv_override * param_overrides_p,
         const llama_model_tensor_buft_override * param_tensor_buft_overrides_p);
 
