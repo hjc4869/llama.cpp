@@ -1100,7 +1100,8 @@ bool llama_model_loader::load_all_data(
         std::vector<std::thread> load_threads;
         for (int i = 0; i < n_load_threads; i++) {
             load_threads.emplace_back(std::thread([&](int thread_index, int start, int end){
-                std::vector<no_init<uint8_t>> local_read_buf(buffer_size);
+                std::vector<no_init<uint8_t>> local_read_buf(buffer_size + 4096);
+                auto aligned_buffer = local_read_buf.data() + (4096 - (int64_t)local_read_buf.data() % 4096);
                 for (int j = start; j < end; j++) {
                     auto& cur = tensors[j];
                     const auto * weight = get_weight(ggml_get_name(cur));
@@ -1114,17 +1115,17 @@ bool llama_model_loader::load_all_data(
                         if (ggml_backend_buffer_is_host(cur->buffer)) {
                             file->read_raw((unsigned char*)cur->data + bytes_read, read_iteration);
                         } else {
-                            file->read_raw(local_read_buf.data(), read_iteration);
+                            file->read_raw(aligned_buffer, read_iteration);
                             if (upload_backend) {
                                 std::lock_guard<std::mutex> guard(lock);
                                 ggml_backend_event_synchronize(events[buffer_idx]);
-                                memcpy(host_ptrs[buffer_idx], local_read_buf.data(), read_iteration);
+                                memcpy(host_ptrs[buffer_idx], aligned_buffer, read_iteration);
                                 ggml_backend_tensor_set_async(upload_backend, cur, host_ptrs[buffer_idx], bytes_read, read_iteration);
                                 ggml_backend_event_record(events[buffer_idx], upload_backend);
                                 ++buffer_idx;
                                 buffer_idx %= n_buffers;
                             } else {
-                                ggml_backend_tensor_set(cur, local_read_buf.data(), bytes_read, read_iteration);
+                                ggml_backend_tensor_set(cur, aligned_buffer, bytes_read, read_iteration);
                             }
                         }
 
