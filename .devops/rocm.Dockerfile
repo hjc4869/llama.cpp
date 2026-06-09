@@ -56,6 +56,7 @@ COPY --from=web /app/tools/ui/dist tools/ui/dist
 
 RUN HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
     cmake -S . -B build \
+        -DGGML_ZENDNN=ON \
         -DGGML_HIP=ON \
         -DGGML_HIP_ROCWMMA_FATTN=ON \
         -DAMDGPU_TARGETS="$ROCM_DOCKER_ARCH" \
