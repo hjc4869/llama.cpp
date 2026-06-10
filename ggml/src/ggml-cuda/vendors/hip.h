@@ -180,6 +180,10 @@
 #error "The HIP backend supports only AMD targets"
 #endif // !defined(__HIP_PLATFORM_AMD__)
 
+#if defined(__SPIRV__) || defined(__SPIRV64__) || defined(SPIRV) || defined(SPIRV64)
+#define GGML_HIP_AMDGCNSPIRV
+#endif // defined(__SPIRV__) || defined(__SPIRV64__) || defined(SPIRV) || defined(SPIRV64)
+
 #define __CUDA_ARCH__ 1300
 
 #if defined(__gfx900__) || defined(__gfx906__)
@@ -261,7 +265,7 @@ typedef uint8_t uint8x4_t __attribute__((ext_vector_type(4)));
 static __device__ __forceinline__ int __vsubss4(const int a, const int b) {
     const int8x4_t va = reinterpret_cast<const int8x4_t&>(a);
     const int8x4_t vb = reinterpret_cast<const int8x4_t&>(b);
-#if __has_builtin(__builtin_elementwise_sub_sat)
+#if __has_builtin(__builtin_elementwise_sub_sat) && !defined(GGML_HIP_AMDGCNSPIRV)
     const int8x4_t c = __builtin_elementwise_sub_sat(va, vb);
     return reinterpret_cast<const int &>(c);
 #else
@@ -275,7 +279,7 @@ static __device__ __forceinline__ int __vsubss4(const int a, const int b) {
         c[i] = tmp;
     }
     return reinterpret_cast<int &>(c);
-#endif // __has_builtin(__builtin_elementwise_sub_sat)
+#endif // __has_builtin(__builtin_elementwise_sub_sat) && !defined(GGML_HIP_AMDGCNSPIRV)
 }
 
 static __device__ __forceinline__ int __vsub4(const int a, const int b) {

@@ -87,6 +87,10 @@ static constexpr __device__ mmvq_parameter_table_id get_device_table_id() {
 }
 
 static __host__ mmvq_parameter_table_id get_device_table_id(int cc) {
+#if defined(GGML_HIP_AMDGCNSPIRV)
+    GGML_UNUSED(cc);
+    return MMVQ_PARAMETERS_GENERIC;
+#else
     if (GGML_CUDA_CC_IS_RDNA4(cc)) {
         return MMVQ_PARAMETERS_RDNA4;
     }
@@ -103,6 +107,7 @@ static __host__ mmvq_parameter_table_id get_device_table_id(int cc) {
         return MMVQ_PARAMETERS_TURING;
     }
     return MMVQ_PARAMETERS_GENERIC;
+#endif // defined(GGML_HIP_AMDGCNSPIRV)
 }
 
 // Per-architecture maximum batch size for which MMVQ should be used for MUL_MAT_ID.
@@ -245,6 +250,11 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_rdna4(ggml_type
 
 // Host function: returns the max batch size for the current arch+type at runtime.
 int get_mmvq_mmid_max_batch(ggml_type type, int cc) {
+#if defined(GGML_HIP_AMDGCNSPIRV)
+    GGML_UNUSED(type);
+    GGML_UNUSED(cc);
+    return MMVQ_MAX_BATCH_SIZE;
+#else
     // NVIDIA: Volta, Ada Lovelace, and Blackwell always use MMVQ for MUL_MAT_ID.
     if (GGML_CUDA_CC_IS_NVIDIA(cc)) {
         if (cc == GGML_CUDA_CC_VOLTA || cc >= GGML_CUDA_CC_ADA_LOVELACE) {
@@ -275,6 +285,7 @@ int get_mmvq_mmid_max_batch(ggml_type type, int cc) {
         }
     }
     return MMVQ_MAX_BATCH_SIZE;
+#endif // defined(GGML_HIP_AMDGCNSPIRV)
 }
 
 bool ggml_cuda_should_use_mmvq(enum ggml_type type, int cc, int64_t ne11) {
