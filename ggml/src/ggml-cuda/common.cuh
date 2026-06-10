@@ -330,15 +330,21 @@ static bool fp32_mma_hardware_available(const int cc) {
 }
 
 static bool amd_mfma_available(const int cc) {
-#if !defined(GGML_HIP_NO_MMQ_MFMA)
+#if !defined(GGML_HIP_NO_MMQ_MFMA) && !defined(GGML_HIP_AMDGCNSPIRV)
     return GGML_CUDA_CC_IS_CDNA(cc);
 #else
+    GGML_UNUSED(cc);
     return false;
-#endif //!defined(GGML_HIP_NO_MMQ_MFMA)
+#endif // !defined(GGML_HIP_NO_MMQ_MFMA) && !defined(GGML_HIP_AMDGCNSPIRV)
 }
 
 static bool amd_wmma_available(const int cc) {
+#if !defined(GGML_HIP_AMDGCNSPIRV)
     return (GGML_CUDA_CC_IS_RDNA4(cc) || GGML_CUDA_CC_IS_RDNA3(cc));
+#else
+    GGML_UNUSED(cc);
+    return false;
+#endif // !defined(GGML_HIP_AMDGCNSPIRV)
 }
 
 static bool volta_mma_available(const int cc) {
