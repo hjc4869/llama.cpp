@@ -24,7 +24,10 @@
 
 // WMMA flash attention requires FP16 matrix instructions to be available for ggml code.
 static bool ggml_cuda_should_use_wmma_fattn(const int cc) {
-#if defined(GGML_USE_HIP) && !defined(GGML_HIP_ROCWMMA_FATTN)
+#if defined(GGML_HIP_AMDGCNSPIRV)
+    GGML_UNUSED(cc);
+    return false;
+#elif defined(GGML_USE_HIP) && !defined(GGML_HIP_ROCWMMA_FATTN)
     return false;
 #else
     if ((GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) == GGML_CUDA_CC_VOLTA) ||
